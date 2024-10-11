@@ -1,0 +1,76 @@
+module LoanApprovalWithLimit where
+
+template Token
+  with
+    owner: Party
+    amount: Decimal
+  where
+    signatory owner
+
+template LoanLimit
+  with
+    bank: Party
+    limit: Decimal
+  where
+    signatory bank
+
+template LoanRequestWithLimit
+  with
+    borrower: Party
+    bank: Party
+    amount: Decimal
+    loanLimit: Decimal
+  where
+    signatory borrower
+    observer bank
+    choice ApproveRequest: ContractId Loan
+      with
+        bankApproval: Party
+      controller bankApproval
+      do
+        assert (amount <= loanLimit) 
+        archive self
+        create Loan with
+          borrower = borrower
+          bank = bank
+          amount = amount
+
+template Loan
+  with
+    borrower: Party
+    bank: Party
+    amount: Decimal
+  where
+    signatory borrower, bank
+
+    choice Disburse: ContractId Token
+      with
+        mintAmount: Decimal
+      controller bank
+      do
+        assert (mintAmount <= amount)
+        create Token with owner = borrower; amount = mintAmount
+
+-- Test Script for Loan Approval with Limit Validation
+
+testTokenDisbursement: Script ()
+testTokenDisbursement = do
+    let borrower = borrower 
+    let bank = bank 
+    let limit = 5000.0 
+    limitId <- submit bank do
+        create LoanLimit with
+            bank = bank
+            limit = limit
+
+    requestId <- submit borrower do
+        create LoanRequestWithLimit with
+            borrower = borrower
+            bank = bank
+            amount = 1000.0
+            loanLimit = limit
+
+    submit bank do
+        exercise requestId ApproveRequest with bankApproval = bank
+
+    
