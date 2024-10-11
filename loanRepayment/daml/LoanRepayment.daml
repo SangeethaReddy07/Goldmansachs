@@ -1,0 +1,77 @@
+module LoanRepayment where
+
+import Daml.Script
+
+RepaymentRestriction Template
+
+_____________________
+
+template RepaymentRestriction
+  with
+    bank: Party
+    minimumRepayment: Decimal
+  where
+    signatory bank
+
+
+Update Loan Template
+___________
+
+template Loan
+  with
+    borrower: Party
+    bank: Party
+    amount: Decimal
+    totalDisbursed: Decimal
+    totalRepaid: Decimal
+    loanLimit: ContractId LoanLimit
+  where
+    signatory borrower, bank
+
+    choice Disburse: ContractId Token
+      with
+        disburseAmount: Decimal
+      controller (borrower, bank)
+      do
+        assert (totalDisbursed + disburseAmount <= amount)
+
+        token <- create Token with
+          owner = borrower
+          amount = disburseAmount
+
+        let newTotalDisbursed = totalDisbursed + disburseAmount
+        exercise self Archive with
+          totalDisbursed = newTotalDisbursed
+          totalRepaid = totalRepaid
+          amount = amount
+
+        return token
+
+    choice Repay: Decimal
+      with
+        repaymentAmount: Decimal
+        restriction: ContractId RepaymentRestriction
+      controller borrower
+      do
+        -- Fetch the repayment restriction
+        restrictionData <- fetch restriction
+        assert (repaymentAmount >= restrictionData.minimumRepayment)
+
+        -- Update the total repaid amount
+        let newTotalRepaid = totalRepaid + repaymentAmount
+        assert (newTotalRepaid <= totalDisbursed)
+
+        -- Archive the loan if fully repaid
+        if newTotalRepaid == amount then do
+          archive self
+          -- Update the utilized loan amount in LoanLimit
+          loanLimitData <- fetch loanLimit
+          let newLimit = loanLimitData.limit - amount
+          exercise loanLimitData Archive with
+            limit = newLimit
+        else do
+          exercise self Archive with
+            totalRepaid = newTotalRepaid
+            totalDisbursed = totalDisbursed
+            amount = amount
+
